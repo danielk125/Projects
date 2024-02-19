@@ -1,0 +1,97 @@
+#-- Financial Web Scraping
+
+from openpyxl import Workbook, load_workbook
+
+#-- use Selinium to access Yahoo Finance
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver import ActionChains
+options = webdriver.ChromeOptions()
+
+#-- prompt user for desired company ticker
+ticker = input("Enter company ticker: ")
+url = 'https://finance.yahoo.com/quote/'+ticker+'/history?p='+ticker
+
+#-- pull data from Yahoo finance
+#options.add_experimental_option("detach", True)
+options.add_experimental_option('excludeSwitches', ['enable-logging'])
+driver = webdriver.Chrome(options=options)
+driver.get(url)
+
+#-- load excel workbook
+wb = Workbook()
+ws = wb.active
+ws.title = 'temporary_data_loading'
+
+#-- store data in excel
+headers = []
+raw_headers = driver.find_element(By.XPATH, '//*[@id="Col1-1-HistoricalDataTable-Proxy"]/section/div[2]/table/thead/tr')
+lst = raw_headers.find_elements(By.TAG_NAME, 'th')
+for x in lst:
+    headers.append(x.text)
+ws.append(headers)
+
+first = []
+table = driver.find_element(By.XPATH, '//*[@id="Col1-1-HistoricalDataTable-Proxy"]/section/div[2]/table/tbody')
+rows = table.find_element(By.TAG_NAME, 'tr')
+cells = rows.find_elements(By.TAG_NAME, 'td')
+for x in cells:
+    first.append(x.text)
+ws.append(first)
+
+#-- change time period
+actions = ActionChains(driver)
+
+time_period_button = driver.find_element(By.XPATH, '//*[@id="Col1-1-HistoricalDataTable-Proxy"]/section/div[1]/div[1]/div[1]/div/div/div')
+actions.move_to_element(time_period_button).click().perform()
+
+five_year_button = driver.find_element(By.XPATH, '//*[@id="dropdown-menu"]/div/ul[2]/li[3]/button')
+actions.move_to_element(five_year_button).click().perform()
+
+apply_button = driver.find_element(By.XPATH, '//*[@id="Col1-1-HistoricalDataTable-Proxy"]/section/div[1]/div[1]/button')
+actions.move_to_element(apply_button).click().perform()
+
+for i in range(40): #-- scrolls down on the page
+    driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.PAGE_DOWN)
+
+raw_table = driver.find_element(By.XPATH, '//*[@id="Col1-1-HistoricalDataTable-Proxy"]/section/div[2]/table/tbody')
+lst1 = raw_table.find_elements(By.TAG_NAME, 'tr')
+for x in lst1:
+    lst2 = x.find_elements(By.TAG_NAME, 'td')
+    if len(lst2) == 2 or lst2 == first:
+        continue
+    row = []
+    for y in lst2:
+        row.append(y.text)
+    ws.append(row)
+wb.save('temporary_data_loading.xlsx')
+
+#-- calculate moving averages
+
+wb = load_workbook('temporary_data_loading.xlsx')
+ws = wb.active
+ws.title = 'temporary_data_loading'
+#-- 50 SMA
+period_sum = 0
+for row in range(2, 52):
+    period_sum += float(ws['E' + str(row)].value)
+SMA_50 = period_sum / 50
+print("50 Day SMA: " + str(SMA_50))
+
+#-- calculate EMAs
+def EMA(n):
+    cur_ema = 0
+    for row in range(n,n*2+1):
+        # creating a starting EMA
+        # makes smaller EMA's less accurate
+        cur_ema += float(ws['E' + str(row)].value) 
+    cur_ema = cur_ema/n
+    for i in range(n+1, 1, -1):
+        cur_ema = (float(ws['E' + str(i)].value) * (2/(n+1)) + cur_ema * (1-2/(n+1)))
+    return cur_ema
+
+print("200 Day EMA: " + str(EMA(200)))
+print("14 Day EMA: " + str(EMA(14)))
